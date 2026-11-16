@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Access Revoked</title>
+<meta name="description" content="Same search. Same cache. Different permissions. A prototype that keeps search results and old links in sync with permission changes, even on a warm cache.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b6e4f'/%3E%3Cpath d='M10 15v-3a6 6 0 0 1 12 0v3' stroke='white' stroke-width='3' fill='none'/%3E%3Crect x='8' y='15' width='16' height='11' rx='2' fill='white'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #f6f5f1; --surface: #ffffff; --surface-2: #efede7; --ink: #1b1b19; --muted: #5d5c57;
+  --line: #dedbd2; --hit: #0b6e4f; --hit-ink: #ffffff; --hit-soft: #dcefe6;
+  --bad: #b42318; --bad-soft: #fbe7e4; --ok: #146c2e; --ok-soft: #e1f2e5;
+  --fin: #8a4b00; --fin-soft: #fbecd6; --ws: #2f4f7a; --ws-soft: #e3eaf4;
+  --focus: #1d5fd1; --shadow: 0 1px 2px rgba(0,0,0,.05), 0 4px 16px rgba(0,0,0,.05);
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121311; --surface: #1b1c1a; --surface-2: #242522; --ink: #ecebe6; --muted: #a3a29b;
+    --line: #34352f; --hit: #2fbf86; --hit-ink: #06281b; --hit-soft: #173628;
+    --bad: #ff8a7a; --bad-soft: #3a1d19; --ok: #6fd48b; --ok-soft: #173020;
+    --fin: #f0b45e; --fin-soft: #3a2a12; --ws: #9dbbe6; --ws-soft: #1e2a3b;
+    --focus: #7fb0ff; --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121311; --surface: #1b1c1a; --surface-2: #242522; --ink: #ecebe6; --muted: #a3a29b;
+  --line: #34352f; --hit: #2fbf86; --hit-ink: #06281b; --hit-soft: #173628;
+  --bad: #ff8a7a; --bad-soft: #3a1d19; --ok: #6fd48b; --ok-soft: #173020;
+  --fin: #f0b45e; --fin-soft: #3a2a12; --ws: #9dbbe6; --ws-soft: #1e2a3b;
+  --focus: #7fb0ff; --shadow: none;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+a { color: inherit; text-underline-offset: 3px; }
+code, pre { font-family: var(--mono); font-size: .88em; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+.wrap { max-width: 960px; margin: 0 auto; padding: 0 16px; }
+
+header.site { padding: 40px 0 20px; }
+header.site h1 { margin: 0; font-size: clamp(2rem, 6vw, 2.8rem); letter-spacing: -.02em; line-height: 1.1; }
+header.site p { margin: 8px 0 0; color: var(--muted); font-size: 1.1rem; }
+
+nav.tabs { position: sticky; top: 0; z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line); }
+nav.tabs .wrap { display: flex; gap: 4px; flex-wrap: wrap; }
+nav.tabs a {
+  padding: 12px 12px 10px; text-decoration: none; color: var(--muted); font-weight: 550;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+nav.tabs a[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); }
+nav.tabs a:hover { color: var(--ink); }
+
+main { padding: 28px 0 48px; }
+section.panel[hidden] { display: none; }
+h2 { font-size: 1.5rem; letter-spacing: -.01em; margin: 0 0 8px; }
+h3 { font-size: 1.1rem; margin: 32px 0 8px; }
+p { margin: 0 0 12px; }
+.muted { color: var(--muted); }
+.note { color: var(--muted); font-size: .9rem; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
+
+/* ---------- Demo ---------- */
+.replay-head { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 16px; }
+.label-pill { font-size: .8rem; font-weight: 650; text-transform: uppercase; letter-spacing: .06em;
+  border: 1px solid var(--line); background: var(--surface); padding: 3px 10px; border-radius: 999px; }
+.stepper { list-style: none; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 0; margin: 0 0 16px; }
+.stepper li { font-size: .88rem; color: var(--muted); border-top: 3px solid var(--line); padding-top: 6px; }
+.stepper li.done { color: var(--ink); border-top-color: var(--ink); }
+.stepper li.current { color: var(--ink); border-top-color: var(--hit); font-weight: 600; }
+.stage { padding: 20px; }
+.searchrow { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.who { font-size: .9rem; color: var(--muted); }
+.who strong { color: var(--ink); }
+.query { flex: 1 1 220px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--line);
+  background: var(--surface-2); border-radius: 8px; padding: 10px 12px; font-weight: 550; min-width: 0; }
+.query svg { flex: none; color: var(--muted); }
+.cache-pill { display: inline-flex; align-items: center; gap: 8px; background: var(--hit); color: var(--hit-ink);
+  font-weight: 750; font-size: 1.15rem; padding: 10px 18px; border-radius: 999px; letter-spacing: .01em; white-space: nowrap; }
+.cache-pill.sm { font-size: .85rem; padding: 3px 10px; gap: 6px; }
+.cache-pill.miss { background: var(--surface-2); color: var(--muted); }
+.cache-pill.pulse { animation: pulse .9s ease-out; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--hit) 55%, transparent); } 100% { box-shadow: 0 0 0 14px transparent; } }
+.cache-sub { font-size: .85rem; color: var(--muted); margin: 8px 0 0; }
+
+.event { margin: 16px 0 0; padding: 12px 14px; border-radius: 8px; background: var(--surface-2); font-size: .95rem; }
+.event[hidden] { display: none; }
+.event code { white-space: nowrap; }
+.count { margin: 20px 0 10px; font-size: 1.05rem; }
+.count .n { font-size: 2rem; font-weight: 800; vertical-align: -3px; margin-right: 4px; transition: color .3s; }
+.count.changed .n { color: var(--bad); }
+
+ul.results { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.result { border: 2px solid var(--line); border-radius: 10px; padding: 14px 16px; background: var(--surface);
+  transition: opacity .5s ease, transform .5s ease, max-height .6s ease .5s, padding .6s ease .5s, margin .6s ease .5s, border-color .3s;
+  max-height: 260px; overflow: hidden; }
+.result h4 { margin: 0 0 4px; font-size: 1.02rem; }
+.result p { margin: 0; color: var(--muted); font-size: .93rem; }
+.result .meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; font-size: .82rem; color: var(--muted); }
+.result.kept-after { border-color: var(--ok); }
+.result.leaving { border-color: var(--bad); opacity: 0; transform: translateX(24px); }
+.result.gone { max-height: 0; padding-top: 0; padding-bottom: 0; border-width: 0; margin: 0; transition-delay: 0s; }
+.tag { display: inline-block; font-size: .75rem; font-weight: 650; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.tag-fin { background: var(--fin-soft); color: var(--fin); }
+.tag-ws { background: var(--ws-soft); color: var(--ws); }
+.tag-kept { background: var(--ok-soft); color: var(--ok); }
+.ghost { border: 1.5px dashed var(--bad); color: var(--bad); border-radius: 10px; padding: 10px 14px; font-size: .9rem; background: var(--bad-soft); }
+
+.link-panel { margin-top: 20px; border-radius: 10px; border: 2px solid var(--bad); overflow: hidden; }
+.link-panel[hidden] { display: none; }
+.link-panel .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 14px; background: var(--surface-2); font-family: var(--mono); font-size: .88rem; }
+.link-panel .body { padding: 14px; display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
+.big-status { font-size: 2.2rem; font-weight: 800; color: var(--bad); line-height: 1; }
+.link-panel pre { margin: 0; padding: 8px 12px; background: var(--surface-2); border-radius: 6px; overflow-x: auto; max-width: 100%; }
+.status { font-family: var(--mono); font-weight: 700; padding: 1px 8px; border-radius: 6px; }
+.status.ok { background: var(--ok-soft); color: var(--ok); }
+.status.bad { background: var(--bad-soft); color: var(--bad); }
+
+.controls { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+button { font: inherit; font-weight: 600; border-radius: 8px; padding: 10px 16px; cursor: pointer;
+  border: 1px solid var(--ink); background: var(--ink); color: var(--bg); }
+button.secondary { background: transparent; color: var(--ink); border-color: var(--line); }
+button:disabled { opacity: .35; cursor: not-allowed; }
+
+details.trace { margin-top: 8px; }
+details.trace summary { cursor: pointer; font-weight: 600; padding: 8px 0; }
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+thead th { font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 650; }
+.trace tr.current td { background: var(--hit-soft); }
+.trace tr[hidden] { display: none; }
+.trace td.req div:first-child { font-family: var(--mono); font-size: .82rem; overflow-wrap: anywhere; }
+.trace td.req .note { font-size: .8rem; }
+@media (max-width: 560px) {
+  .trace thead { display: none; }
+  .trace table, .trace tbody { display: block; }
+  .trace tr { display: block; padding: 10px 6px; border-bottom: 1px solid var(--line); }
+  .trace tr[hidden] { display: none; }
+  .trace td { border: 0; padding: 3px 0; display: flex; gap: 12px; align-items: baseline; min-width: 0; }
+  .trace td::before { content: attr(data-label); flex: 0 0 76px; font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 650; }
+  .trace td.req { flex-wrap: wrap; }
+  .trace td.req div { min-width: 0; }
+}
+
+/* ---------- Report ---------- */
+.lede { font-size: 1.08rem; }
+.stat-row { display: grid; grid-template-columns: 1.1fr repeat(3, 1fr); gap: 12px; margin: 20px 0 8px; }
+.stat { padding: 16px; }
+.stat .k { font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 650; }
+.stat .v { font-size: 1.6rem; font-weight: 800; line-height: 1.15; margin: 6px 0 4px; }
+.stat .d { font-size: .88rem; color: var(--muted); }
+.stat.tests .v { font-size: 2.2rem; }
+.stat .v .arrow { color: var(--muted); font-weight: 500; }
+.v .bad { color: var(--bad); }
+.v .ok { color: var(--ok); }
+.ba th[scope="row"] { width: 22%; font-weight: 600; }
+.ba thead th.after-h { color: var(--ink); }
+.ba td.after { background: var(--hit-soft); }
+.ba .num { display: block; font-size: 1.5rem; line-height: 1.2; }
+.ba td { line-height: 1.7; }
+.flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0 16px; counter-reset: f; }
+.flow div { padding: 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); font-size: .9rem; }
+.flow div b { display: block; margin-bottom: 2px; }
+.flow div::before { counter-increment: f; content: counter(f); display: inline-grid; place-items: center; width: 22px; height: 22px;
+  border-radius: 50%; background: var(--ink); color: var(--bg); font-size: .75rem; font-weight: 700; margin-bottom: 6px; }
+.flow div.gate { border: 2px solid var(--hit); }
+.code-ref { display: inline-flex; flex-wrap: wrap; gap: 0 6px; align-items: baseline; max-width: 100%; }
+.code-ref code, ul.tests code, .stat .d code, td code { overflow-wrap: anywhere; min-width: 0; }
+.code-ref span { font-size: .8rem; color: var(--muted); }
+.code-ref.pending code { border-bottom: 1px dashed var(--muted); }
+.pending { color: var(--muted); }
+pre.src { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; overflow-x: auto; font-size: .82rem; line-height: 1.5; }
+.scope { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.scope .card { padding: 14px 16px; }
+.scope h4 { margin: 0 0 6px; }
+.scope ul { margin: 0; padding-left: 18px; }
+ul.tests { columns: 2; column-gap: 24px; font-size: .85rem; padding-left: 18px; }
+ul.tests li { break-inside: avoid; margin-bottom: 2px; }
+.refs li { margin-bottom: 6px; }
+pre.cmd { background: var(--surface-2); border-radius: 8px; padding: 12px; overflow-x: auto; font-size: .85rem; }
+
+/* ---------- Prose tabs ---------- */
+.prose { max-width: 680px; }
+.prose blockquote { margin: 0; font-size: 1.12rem; line-height: 1.65; }
+.prose blockquote p { margin-bottom: 16px; }
+.bring { list-style: none; padding: 0; margin: 16px 0 0; display: grid; gap: 12px; }
+.bring li { padding: 14px 16px; }
+.bring b { display: block; margin-bottom: 2px; }
+
+footer.site { border-top: 1px solid var(--line); padding: 20px 0 40px; font-size: .92rem; }
+footer.site ul { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 8px 20px; }
+
+@media (max-width: 760px) {
+  .stat-row { grid-template-columns: 1fr 1fr; }
+  .flow { grid-template-columns: 1fr 1fr; }
+  .scope { grid-template-columns: 1fr; }
+  ul.tests { columns: 1; }
+}
+@media (max-width: 480px) {
+  nav.tabs a { padding: 10px 8px 8px; font-size: .92rem; }
+  .stage { padding: 14px; }
+  .cache-pill { font-size: 1rem; padding: 8px 14px; }
+  .stepper li { font-size: .78rem; }
+  .ba th[scope="row"] { width: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}
+</style>
+</head>
+<body>
+<header class="site">
+  <div class="wrap">
+    <h1>Access Revoked</h1>
+    <p>Same search. Same cache. Different permissions.</p>
+  </div>
+</header>
+
+<nav class="tabs" aria-label="Sections">
+  <div class="wrap" role="tablist">
+    <a href="#demo" role="tab" id="tab-demo" aria-controls="demo">Demo</a>
+    <a href="#report" role="tab" id="tab-report" aria-controls="report">Detailed Report</a>
+    <a href="#why" role="tab" id="tab-why" aria-controls="why">Why I Built This</a>
+    <a href="#about" role="tab" id="tab-about" aria-controls="about">About Me &amp; What I Bring</a>
+  </div>
+</nav>
+
+<main class="wrap">
+
+<!-- ================= DEMO ================= -->
+<section class="panel" id="demo" role="tabpanel" aria-labelledby="tab-demo">
+  <div class="replay-head">
+    <span class="label-pill">Replay of a local run</span>
+    <span class="note">Captured 2026-11-16T22:54:00Z from the FastAPI app. People and documents are fictional sample data.</span>
+  </div>
+
+  <ol class="stepper" id="stepper">
+    <li>1. Maya searches again</li>
+    <li>2. Finance access revoked</li>
+    <li>3. Maya tries the old link</li>
+  </ol>
+
+  <div class="card stage" aria-live="polite">
+    <div class="searchrow">
+      <div class="who">Signed in as <strong id="who-user">Maya</strong></div>
+      <div class="query" aria-label="Search query">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <span id="q"></span>
+      </div>
+      <div class="cache-pill" id="cache-pill">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>
+        <span id="cache-text">Cache hit</span>
+      </div>
+    </div>
+    <p class="cache-sub" id="cache-sub"></p>
+
+    <div class="event" id="event" hidden></div>
+
+    <div class="count" id="count"><span class="n" id="count-n"></span> <span id="count-text"></span></div>
+    <ul class="results" id="results"></ul>
+
+    <div class="link-panel" id="link-panel" hidden>
+      <div class="bar"><span id="link-req"></span></div>
+      <div class="body">
+        <div class="big-status" id="link-status"></div>
+        <div>
+          <pre id="link-json"></pre>
+          <p class="note" id="link-before" style="margin:8px 0 0"></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button id="btn-revoke" type="button">Show revocation</button>
+    <button id="btn-link" type="button" disabled>Try the old link</button>
+    <button id="btn-reset" type="button" class="secondary" disabled>Reset replay</button>
+  </div>
+
+  <details class="trace card" style="padding: 4px 16px 12px">
+    <summary>Request trace</summary>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>#</th><th>Request</th><th>Query</th><th>Cache</th><th>Permitted results</th><th>HTTP</th></tr></thead>
+        <tbody id="trace-body"></tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:8px">Values are copied from the recorded responses. Rows appear as the replay reaches them.</p>
+  </details>
+</section>
+
+<!-- ================= REPORT ================= -->
+<section class="panel" id="report" role="tabpanel" aria-labelledby="tab-report" hidden>
+  <h2>Detailed report</h2>
+  <p class="lede">A user's search results come from a warm cache. An admin revokes their access. The next search and the old document link should both reflect that, without clearing the cache.</p>
+
+  <div class="stat-row">
+    <div class="card stat tests">
+      <div class="k">Test suite</div>
+      <div class="v">19/19</div>
+      <div class="d">tests passed. Generation stops if any test fails.</div>
+    </div>
+    <div class="card stat">
+      <div class="k">Warm cache after revocation</div>
+      <div class="v">2 <span class="arrow">→</span> <span class="bad">1</span></div>
+      <div class="d">results on a cache hit</div>
+    </div>
+    <div class="card stat">
+      <div class="k">Old link</div>
+      <div class="v"><span class="ok">200</span> <span class="arrow">→</span> <span class="bad">404</span></div>
+      <div class="d"><code>GET /docs/2</code></div>
+    </div>
+    <div class="card stat">
+      <div class="k">Restricted fields after revocation</div>
+      <div class="v">0 found</div>
+      <div class="d">Checked: title, snippet, url, body, id</div>
+    </div>
+  </div>
+  <p class="note">All values on this page come from the latest test run and walkthrough, captured 2026-11-16T22:54:00Z (Python 3.11.4, SQLite 3.41.2).</p>
+
+  <h3>Before and after revocation</h3>
+  <div class="card table-scroll">
+    <table class="ba">
+      <thead><tr><th></th><th>Before revocation</th><th class="after-h">After revocation</th></tr></thead>
+      <tbody>
+<tr><th scope="row">Query</th><td><code>renewal budget</code></td><td class="after"><code>renewal budget</code></td></tr>
+<tr><th scope="row">Cache status</th><td><span class="cache-pill sm">Cache hit</span></td><td class="after"><span class="cache-pill sm">Cache hit</span></td></tr>
+<tr><th scope="row">Visible results</th><td><strong class="num">2</strong>Renewal budget planning: kickoff notes <span class="tag tag-ws">Workspace-wide</span><br>Renewal budget: vendor line items (Finance only) <span class="tag tag-fin">Finance only</span></td><td class="after"><strong class="num">1</strong>Renewal budget planning: kickoff notes <span class="tag tag-ws">Workspace-wide</span></td></tr>
+<tr><th scope="row">Direct link <code>/docs/2</code></th><td><span class="status ok">200</span></td><td class="after"><span class="status bad">404</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Request path</h3>
+  <p>The permission check sits between candidate retrieval and text loading. The cache only covers the first step.</p>
+  <div class="flow">
+    <div><b>Candidates</b>The cache, or FTS5 on a miss, returns ranked document IDs for the query. Nothing user-specific.</div>
+    <div class="gate"><b>Current ACL</b>A join on <code>doc_grants</code> and <code>memberships</code> keeps only IDs the user can read now.</div>
+    <div><b>Load text</b>Titles and bodies are read only for permitted IDs.</div>
+    <div><b>Snippets</b>Snippets are built only from permitted text, then the response is sent.</div>
+  </div>
+  <ul class="refs">
+    <li><span class="code-ref pending" title="Repository link added when the repo is public"><code>search()</code><span>app/search.py:106</span></span>: the whole path in one function.</li>
+    <li><span class="code-ref pending" title="Repository link added when the repo is public"><code>CandidateCache</code><span>app/search.py:25</span></span> and <span class="code-ref pending" title="Repository link added when the repo is public"><code>fts_candidates()</code><span>app/search.py:56</span></span>: candidate IDs. FTS5 terms are quoted, so user input can't use FTS operators.</li>
+    <li><span class="code-ref pending" title="Repository link added when the repo is public"><code>permitted_ids()</code><span>app/search.py:70</span></span>: the ACL filter, which keeps ranking order.</li>
+    <li><span class="code-ref pending" title="Repository link added when the repo is public"><code>load_documents()</code><span>app/search.py:86</span></span> and <span class="code-ref pending" title="Repository link added when the repo is public"><code>build_snippet()</code><span>app/search.py:96</span></span>: text and snippets for permitted IDs only. <span class="code-ref pending" title="Repository link added when the repo is public"><code>test_restricted_text_never_loaded_after_revocation</code><span>tests/test_access.py:122</span></span> records the SQL and checks that the restricted ID never reaches the text query.</li>
+    <li><span class="code-ref pending" title="Repository link added when the repo is public"><code>get_document()</code><span>app/search.py:154</span></span>: direct links use the same ACL join and return the same 404 for "forbidden" and "doesn't exist".</li>
+  </ul>
+
+  <h3>Transaction boundary</h3>
+  <p>The ACL filter and the text load run inside one SQLite read transaction. The database is in WAL mode, so that transaction reads from one snapshot, fixed at its first read. Revocation is a separate write transaction (<span class="code-ref pending" title="Repository link added when the repo is public"><code>revoke_membership()</code><span>app/search.py:172</span></span>, <code>BEGIN IMMEDIATE</code>). There are only two cases:</p>
+  <ul>
+    <li><b>The revocation committed before the search's snapshot.</b> The ACL filter drops the document, so its text is never read.</li>
+    <li><b>The revocation committed after the snapshot.</b> That one search is consistent with the old permissions, both for the ACL and the text. The next search enforces the revocation.</li>
+  </ul>
+  <p><span class="code-ref pending" title="Repository link added when the repo is public"><code>test_transaction_boundary</code><span>tests/test_access.py:139</span></span> covers both cases. It commits a revocation from a second connection between the ACL filter and the text load. The in-flight search returns its consistent snapshot, and the next search (still a cache hit) drops the Finance document.</p>
+  <p><b>Why warm candidate IDs are safe to reuse.</b> A cache entry is a list of document IDs that match the query text. It doesn't hold titles, text, or permission decisions. A permission change doesn't change which documents match the words, so the cached list stays correct. What changes is which of those IDs survive the ACL filter, and that runs on every request. The cache never needs to be cleared when access changes, and one user's entry can serve another user.</p>
+
+  <h4 style="margin:20px 0 6px">Cross-user cache test</h4>
+  <p>Maya, who is in Finance, warms the cache. Sam, who isn't, runs the same query. In the recorded walkthrough, Sam's search was a <span class="cache-pill sm">Cache hit</span> and returned 1 result: Renewal budget planning: kickoff notes <span class="tag tag-ws">Workspace-wide</span>. <span class="code-ref pending" title="Repository link added when the repo is public"><code>test_cross_user_cache_shares_ids_not_results</code><span>tests/test_access.py:75</span></span> checks this, and <span class="code-ref pending" title="Repository link added when the repo is public"><code>test_cross_user_cache_does_not_narrow_results</code><span>tests/test_access.py:84</span></span> checks the reverse: a cache warmed by Sam doesn't narrow Maya's results.</p>
+  <pre class="src"><code>def test_cross_user_cache_shares_ids_not_results(client):
+    # Maya (Finance) warms the cache; Sam (no Finance) reuses it.
+    assert search(client, MAYA)[&quot;cache&quot;] == &quot;miss&quot;
+    sam = client.get(&quot;/search&quot;, params={&quot;q&quot;: QUERY}, headers=SAM)
+    assert sam.json()[&quot;cache&quot;] == &quot;hit&quot;
+    assert ids(sam.json()) == [WORKSPACE_DOC]
+    assert FINANCE_TITLE not in sam.text</code></pre>
+
+  <h3>Scope</h3>
+  <div class="scope">
+    <div class="card"><h4>Covered</h4><ul>
+      <li>Every search and direct-link request that starts after the revocation commits.</li>
+      <li>Requests from any user, whether the cache was warmed by them or by someone else.</li>
+    </ul></div>
+    <div class="card"><h4>Not covered</h4><ul>
+      <li>Copies already delivered: a page left open, a downloaded file, a response already rendered on screen.</li>
+      <li>Offline devices or clients with local copies. Revoking server access doesn't erase data already on a device.</li>
+      <li>A search whose snapshot was taken before the commit. It finishes with the old permissions.</li>
+    </ul></div>
+  </div>
+
+  <h3>The replay and the live app</h3>
+  <p>The Demo tab is a static replay. It illustrates the server's behavior using responses recorded from a real local run (<span class="code-ref pending" title="Repository link added when the repo is public"><code>scripts/walkthrough.py</code><span>scripts/walkthrough.py</span></span>). The page makes no requests, and the browser doesn't enforce anything. The post-revocation panel and the request trace come from the recorded responses, after the generator strips anything the page doesn't display.</p>
+  <p>To exercise authorization live, run the local app and send the requests yourself:</p>
+<pre class="cmd"><code>uvicorn app.main:create_app --factory
+curl -H 'X-User: maya' 'localhost:8000/search?q=renewal+budget'
+curl -X POST -H 'X-User: admin' -H 'Content-Type: application/json' \
+     -d '{"user":"maya","group":"finance"}' localhost:8000/admin/memberships/revoke
+curl -H 'X-User: maya' 'localhost:8000/search?q=renewal+budget'
+curl -i -H 'X-User: maya' localhost:8000/docs/2</code></pre>
+  <p class="note"><code>X-User</code> is a demo stand-in for a real session.</p>
+
+  <h3>How this page is built</h3>
+  <p><span class="code-ref pending" title="Repository link added when the repo is public"><code>scripts/build_report.py</code><span>scripts/build_report.py</span></span> runs the test suite and stops if anything fails. It then runs the walkthrough against a live uvicorn server and checks the recorded behavior against each claim on this page. If any claim doesn't hold, it stops. Otherwise it embeds the sanitized data in this file.</p>
+  <p class="note">Code references show file and line. Links to the repository will be added when it is public.</p>
+
+  <details>
+    <summary style="cursor:pointer;font-weight:600;padding:6px 0">All 19 tests (19 passed, 0 skipped)</summary>
+    <ul class="tests">
+<li><code>test_first_search_misses_second_hits</code></li>
+<li><code>test_cache_header_matches_body</code></li>
+<li><code>test_revocation_with_warm_cache_hides_finance_doc</code></li>
+<li><code>test_old_link_returns_404_after_revocation</code></li>
+<li><code>test_forbidden_and_missing_docs_look_the_same</code></li>
+<li><code>test_post_revocation_response_has_no_restricted_fields</code></li>
+<li><code>test_cross_user_cache_shares_ids_not_results</code></li>
+<li><code>test_cross_user_cache_does_not_narrow_results</code></li>
+<li><code>test_regrant_restores_access_with_same_cache</code></li>
+<li><code>test_snippets_built_only_for_permitted_docs</code></li>
+<li><code>test_restricted_text_never_loaded_after_revocation</code></li>
+<li><code>test_transaction_boundary</code></li>
+<li><code>test_unknown_user_rejected</code></li>
+<li><code>test_only_admin_can_revoke</code></li>
+<li><code>test_fts_operators_in_query_are_literal</code></li>
+<li><code>test_query_normalization_shares_cache_entry</code></li>
+<li><code>test_live_page_served</code></li>
+<li><code>test_me_reports_current_groups</code></li>
+<li><code>test_reset_restores_access_and_empties_cache</code></li>
+    </ul>
+  </details>
+</section>
+
+<!-- ================= WHY ================= -->
+<section class="panel prose" id="why" role="tabpanel" aria-labelledby="tab-why" hidden>
+  <h2>Why I built this</h2>
+  <blockquote>
+    <p>Working on retrieval tools made me curious about what happens when the index knows about a document but the person searching can no longer open it.</p>
+    <p>I wanted to test that with a warm cache, because the system already knows which documents match.</p>
+    <p>Access Revoked shows where the permission check has to happen so that the next search and the old document link both honor the change.</p>
+  </blockquote>
+</section>
+
+<!-- ================= ABOUT ================= -->
+<section class="panel prose" id="about" role="tabpanel" aria-labelledby="tab-about" hidden>
+  <h2>About me &amp; what I bring</h2>
+  <p>I'm Mahek Sota, a software engineer at the University of Mississippi.</p>
+  <ul class="bring">
+    <li class="card"><b>Retrieval and AI tooling</b>I've built search and retrieval tools and an MCP platform that integrates 5+ tools with OpenTelemetry tracing.</li>
+    <li class="card"><b>Backend and data systems</b>I've operated Python, Kafka, and PostgreSQL pipelines that processed 50M+ records, with hands-on work in monitoring and recovery.</li>
+    <li class="card"><b>Permissions in application workflows</b>I built role-based access into a personal care coordination project. This prototype builds on that experience by testing what happens when access changes mid-session.</li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <ul>
+      <li><a href="https://impact-doc.vercel.app/" target="_blank" rel="noopener">Impact doc</a></li>
+      <li><a href="https://www.linkedin.com/in/mahek-sota/" target="_blank" rel="noopener">LinkedIn</a></li>
+      <li><a href="https://github.com/mahek-sota" target="_blank" rel="noopener">GitHub</a></li>
+      <li><span class="pending" title="Added when the repository is public">Project repository (link coming soon)</span></li>
+    </ul>
+  </div>
+</footer>
+
+<script id="replay-data" type="application/json">{"captured_at": "2026-11-16T22:54:00Z", "query": "renewal budget", "steps": [{"label": "search_cold", "user": "maya", "method": "GET", "path": "/search?q=renewal+budget", "status": 200, "cache": "miss", "query": "renewal budget", "permitted_count": 2, "results": [{"id": 1, "title": "Renewal budget planning: kickoff notes", "snippet": "Kickoff notes for the renewal budget cycle. Teams submit renewal requests by the end of the month. Owners and timelines…", "url": "/docs/1", "access": "Workspace-wide"}, {"id": 2, "title": "Renewal budget: vendor line items (Finance only)", "snippet": "Draft renewal budget with per-vendor line items for the fictional Example Co. Includes negotiated discount targets and t…", "url": "/docs/2", "access": "Finance only"}]}, {"label": "search_warm", "user": "maya", "method": "GET", "path": "/search?q=renewal+budget", "status": 200, "cache": "hit", "query": "renewal budget", "permitted_count": 2, "results": [{"id": 1, "title": "Renewal budget planning: kickoff notes", "snippet": "Kickoff notes for the renewal budget cycle. Teams submit renewal requests by the end of the month. Owners and timelines…", "url": "/docs/1", "access": "Workspace-wide"}, {"id": 2, "title": "Renewal budget: vendor line items (Finance only)", "snippet": "Draft renewal budget with per-vendor line items for the fictional Example Co. Includes negotiated discount targets and t…", "url": "/docs/2", "access": "Finance only"}]}, {"label": "search_other_user", "user": "sam", "method": "GET", "path": "/search?q=renewal+budget", "status": 200, "cache": "hit", "query": "renewal budget", "permitted_count": 1, "results": [{"id": 1, "title": "Renewal budget planning: kickoff notes", "snippet": "Kickoff notes for the renewal budget cycle. Teams submit renewal requests by the end of the month. Owners and timelines…", "url": "/docs/1", "access": "Workspace-wide"}]}, {"label": "open_link_before", "user": "maya", "method": "GET", "path": "/docs/2", "status": 200, "cache": null, "response": {"id": 2, "title": "Renewal budget: vendor line items (Finance only)"}}, {"label": "revoke", "user": "admin", "method": "POST", "path": "/admin/memberships/revoke", "status": 200, "cache": null, "request_body": {"user": "maya", "group": "finance"}, "response": {"revoked": true, "user": "maya", "group": "finance"}}, {"label": "search_after_revoke", "user": "maya", "method": "GET", "path": "/search?q=renewal+budget", "status": 200, "cache": "hit", "query": "renewal budget", "permitted_count": 1, "results": [{"id": 1, "title": "Renewal budget planning: kickoff notes", "snippet": "Kickoff notes for the renewal budget cycle. Teams submit renewal requests by the end of the month. Owners and timelines…", "url": "/docs/1", "access": "Workspace-wide"}]}, {"label": "open_link_after", "user": "maya", "method": "GET", "path": "/docs/2", "status": 404, "cache": null, "response": {"detail": "Not found"}}]}</script>
+<script>
+(function () {
+  "use strict";
+
+  /* ---------- Tabs with direct links ---------- */
+  var TABS = ["demo", "report", "why", "about"];
+  function showTab(id, focus) {
+    if (TABS.indexOf(id) < 0) id = "demo";
+    TABS.forEach(function (t) {
+      var on = t === id;
+      document.getElementById(t).hidden = !on;
+      var tab = document.getElementById("tab-" + t);
+      tab.setAttribute("aria-selected", on ? "true" : "false");
+      tab.tabIndex = on ? 0 : -1;
+      if (on && focus) tab.focus();
+    });
+  }
+  function fromHash() { return (location.hash || "#demo").slice(1); }
+  window.addEventListener("hashchange", function () { showTab(fromHash()); window.scrollTo(0, 0); });
+  document.querySelector('[role="tablist"]').addEventListener("keydown", function (e) {
+    var i = TABS.indexOf(fromHash()); if (i < 0) i = 0;
+    var next = e.key === "ArrowRight" ? i + 1 : e.key === "ArrowLeft" ? i - 1 : null;
+    if (next === null) return;
+    e.preventDefault();
+    next = (next + TABS.length) % TABS.length;
+    history.replaceState(null, "", "#" + TABS[next]);
+    showTab(TABS[next], true);
+  });
+  showTab(fromHash());
+
+  /* ---------- Replay ---------- */
+  var data = JSON.parse(document.getElementById("replay-data").textContent);
+  var byLabel = {};
+  data.steps.forEach(function (s) { byLabel[s.label] = s; });
+  var warm = byLabel.search_warm, after = byLabel.search_after_revoke,
+      revoke = byLabel.revoke, linkBefore = byLabel.open_link_before, linkAfter = byLabel.open_link_after;
+  var afterIds = after.results.map(function (r) { return r.id; });
+
+  // Trace rows shown at each replay state (Sam's cross-user request is in the report).
+  var TRACE = [
+    ["search_cold", "search_warm", "open_link_before"],
+    ["revoke", "search_after_revoke"],
+    ["open_link_after"]
+  ];
+  var LABELS = {
+    search_cold: "Maya's first search", search_warm: "Maya's second search",
+    open_link_before: "Maya opens the Finance doc", revoke: "Admin removes Maya from Finance",
+    search_after_revoke: "Maya's next search", open_link_after: "Maya tries the old link"
+  };
+
+  var $ = function (id) { return document.getElementById(id); };
+  var state = 0, timers = [];
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function tagFor(access) { return el("span", "tag " + (access === "Finance only" ? "tag-fin" : "tag-ws"), access); }
+
+  function resultCard(r) {
+    var li = el("li", "result");
+    li.dataset.id = r.id;
+    li.appendChild(el("h4", null, r.title));
+    li.appendChild(el("p", null, r.snippet));
+    var meta = el("div", "meta");
+    meta.appendChild(tagFor(r.access));
+    meta.appendChild(el("code", null, r.url));
+    li.appendChild(meta);
+    return li;
+  }
+
+  function setCount(n, text, changed) {
+    $("count-n").textContent = n;
+    $("count-text").textContent = text;
+    $("count").classList.toggle("changed", !!changed);
+  }
+
+  function renderTrace() {
+    var body = $("trace-body");
+    body.textContent = "";
+    var n = 0;
+    TRACE.forEach(function (labels, stage) {
+      labels.forEach(function (label) {
+        var s = byLabel[label]; n++;
+        var tr = el("tr");
+        tr.hidden = stage > state;
+        if (stage === state) tr.className = "current";
+        var cell = function (label, node) { node.setAttribute("data-label", label); tr.appendChild(node); return node; };
+        cell("Step", el("td", null, String(n)));
+        var req = el("td", "req");
+        req.appendChild(el("div", null, s.method + " " + s.path));
+        req.appendChild(el("div", "note", LABELS[label] + " (X-User: " + s.user + ")"));
+        cell("Request", req);
+        cell("Query", el("td", null, s.query != null ? s.query : "—"));
+        var cache = el("td");
+        if (s.cache) cache.appendChild(el("span", "cache-pill sm" + (s.cache === "hit" ? "" : " miss"), "Cache " + s.cache));
+        else cache.textContent = "—";
+        cell("Cache", cache);
+        cell("Permitted", el("td", null, s.permitted_count != null ? String(s.permitted_count) : "—"));
+        var http = el("td");
+        http.appendChild(el("span", "status " + (s.status < 400 ? "ok" : "bad"), String(s.status)));
+        cell("HTTP", http);
+        body.appendChild(tr);
+      });
+    });
+  }
+
+  function renderStepper() {
+    var items = $("stepper").children;
+    for (var i = 0; i < items.length; i++) {
+      items[i].className = i < state ? "done" : i === state ? "current" : "";
+    }
+  }
+
+  function pulseCache() {
+    var p = $("cache-pill");
+    p.classList.remove("pulse"); void p.offsetWidth; p.classList.add("pulse");
+  }
+
+  function setCachePill(step) {
+    $("cache-text").textContent = "Cache " + step.cache;
+    $("cache-pill").classList.toggle("miss", step.cache !== "hit");
+  }
+
+  function reset() {
+    timers.forEach(clearTimeout); timers = [];
+    state = 0;
+    $("q").textContent = warm.query;
+    setCachePill(warm);
+    $("cache-sub").textContent = "Second search for this query: candidate IDs come from the cache, then Maya's current access is applied.";
+    $("event").hidden = true;
+    $("link-panel").hidden = true;
+    setCount(warm.permitted_count, warm.permitted_count === 1 ? "result Maya can open" : "results Maya can open");
+    var list = $("results");
+    list.textContent = "";
+    warm.results.forEach(function (r) { list.appendChild(resultCard(r)); });
+    $("btn-revoke").disabled = false;
+    $("btn-link").disabled = true;
+    $("btn-reset").disabled = true;
+    renderStepper(); renderTrace();
+  }
+
+  function showRevocation() {
+    state = 1;
+    var ev = $("event");
+    ev.textContent = "";
+    ev.appendChild(el("strong", null, "Admin removed Maya from Finance. "));
+    ev.appendChild(el("code", null, revoke.method + " " + revoke.path + " → " + revoke.status));
+    ev.appendChild(document.createTextNode(" Then Maya searched again. The cache wasn't cleared."));
+    ev.hidden = false;
+    setCachePill(after);
+    pulseCache();
+    $("cache-sub").textContent = "Still a cache hit: same candidate IDs. The current ACL now filters one out.";
+
+    var list = $("results");
+    Array.prototype.forEach.call(list.querySelectorAll(".result"), function (li) {
+      var keep = afterIds.indexOf(Number(li.dataset.id)) >= 0;
+      if (keep) {
+        li.classList.add("kept-after");
+        li.querySelector(".meta").appendChild(el("span", "tag tag-kept", "Still visible"));
+      } else {
+        li.classList.add("leaving");
+        timers.push(setTimeout(function () {
+          li.classList.add("gone");
+          var ghost = el("li", "ghost", "Finance-only result removed from the response. Its title, snippet, and link are not sent.");
+          list.insertBefore(ghost, li);
+        }, 600));
+      }
+    });
+    // Anything in the recorded response that wasn't shown before.
+    after.results.forEach(function (r) {
+      if (!list.querySelector('[data-id="' + r.id + '"]')) list.appendChild(resultCard(r));
+    });
+    setCount(after.permitted_count, after.permitted_count === 1 ? "result Maya can open" : "results Maya can open", true);
+    $("btn-revoke").disabled = true;
+    $("btn-link").disabled = false;
+    $("btn-reset").disabled = false;
+    renderStepper(); renderTrace();
+  }
+
+  function showOldLink() {
+    state = 2;
+    $("link-req").textContent = linkAfter.method + " " + linkAfter.path + "   X-User: " + linkAfter.user;
+    $("link-status").textContent = linkAfter.status;
+    $("link-json").textContent = JSON.stringify(linkAfter.response, null, 2);
+    $("link-before").textContent = "Same request before revocation: " + linkBefore.status + ". The response doesn't say whether the document exists.";
+    $("link-panel").hidden = false;
+    $("btn-link").disabled = true;
+    renderStepper(); renderTrace();
+    $("link-panel").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  $("btn-revoke").addEventListener("click", showRevocation);
+  $("btn-link").addEventListener("click", showOldLink);
+  $("btn-reset").addEventListener("click", reset);
+  reset();
+})();
+</script>
+</body>
+</html>

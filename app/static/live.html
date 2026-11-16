@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Access Revoked Live</title>
+<style>
+:root {
+  --bg: #f6f5f1; --surface: #fff; --surface-2: #efede7; --ink: #1b1b19; --muted: #5d5c57; --line: #dedbd2;
+  --hit: #0b6e4f; --hit-ink: #fff; --hit-soft: #dcefe6; --bad: #b42318; --bad-soft: #fbe7e4;
+  --ok: #146c2e; --ok-soft: #e1f2e5; --fin: #8a4b00; --fin-soft: #fbecd6; --ws: #2f4f7a; --ws-soft: #e3eaf4;
+  --focus: #1d5fd1; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121311; --surface: #1b1c1a; --surface-2: #242522; --ink: #ecebe6; --muted: #a3a29b; --line: #34352f;
+    --hit: #2fbf86; --hit-ink: #06281b; --hit-soft: #173628; --bad: #ff8a7a; --bad-soft: #3a1d19;
+    --ok: #6fd48b; --ok-soft: #173020; --fin: #f0b45e; --fin-soft: #3a2a12; --ws: #9dbbe6; --ws-soft: #1e2a3b; --focus: #7fb0ff;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121311; --surface: #1b1c1a; --surface-2: #242522; --ink: #ecebe6; --muted: #a3a29b; --line: #34352f;
+  --hit: #2fbf86; --hit-ink: #06281b; --hit-soft: #173628; --bad: #ff8a7a; --bad-soft: #3a1d19;
+  --ok: #6fd48b; --ok-soft: #173020; --fin: #f0b45e; --fin-soft: #3a2a12; --ws: #9dbbe6; --ws-soft: #1e2a3b; --focus: #7fb0ff;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+code, pre { font-family: var(--mono); font-size: .86em; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.wrap { max-width: 1080px; margin: 0 auto; padding: 0 16px; }
+header { padding: 28px 0 12px; }
+h1 { margin: 0; font-size: 1.9rem; letter-spacing: -.02em; }
+header p { margin: 4px 0 0; color: var(--muted); }
+.live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--hit); margin-right: 6px; vertical-align: 1px; }
+.grid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; align-items: start; padding-bottom: 40px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+.card + .card { margin-top: 16px; }
+h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; background: transparent; color: var(--ink); padding: 8px 14px; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+button { font: inherit; font-weight: 600; border-radius: 8px; padding: 9px 14px; cursor: pointer; border: 1px solid var(--ink); background: var(--ink); color: var(--bg); }
+button.secondary { background: transparent; color: var(--ink); border-color: var(--line); }
+button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+button.small { padding: 4px 10px; font-size: .85rem; }
+button:disabled { opacity: .4; cursor: not-allowed; }
+input[type=search] { font: inherit; flex: 1 1 200px; min-width: 0; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--ink); }
+.groups { font-size: .88rem; color: var(--muted); }
+.chip { display: inline-block; font-size: .75rem; font-weight: 650; padding: 1px 8px; border-radius: 999px; background: var(--surface-2); color: var(--muted); margin-left: 4px; }
+.chip.fin { background: var(--fin-soft); color: var(--fin); }
+.chip.ws { background: var(--ws-soft); color: var(--ws); }
+.cache-pill { display: inline-flex; align-items: center; gap: 6px; font-weight: 750; padding: 6px 14px; border-radius: 999px; background: var(--hit); color: var(--hit-ink); }
+.cache-pill.miss { background: var(--surface-2); color: var(--muted); }
+.flash { animation: flash .8s ease-out; }
+@keyframes flash { from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--hit) 60%, transparent); } to { box-shadow: 0 0 0 12px transparent; } }
+.summary { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 14px 0 10px; }
+.count { font-size: 1.05rem; }
+.count b { font-size: 1.8rem; vertical-align: -3px; margin-right: 4px; }
+.count.down b { color: var(--bad); }
+ul.results { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.result { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.result h3 { margin: 0 0 2px; font-size: 1rem; }
+.result p { margin: 0 0 8px; color: var(--muted); font-size: .92rem; }
+.empty { color: var(--muted); font-size: .92rem; }
+.status { font-family: var(--mono); font-weight: 700; padding: 1px 8px; border-radius: 6px; font-size: .85rem; }
+.status.ok { background: var(--ok-soft); color: var(--ok); }
+.status.bad { background: var(--bad-soft); color: var(--bad); }
+.doc-panel { margin-top: 14px; border-radius: 10px; border: 2px solid var(--line); overflow: hidden; }
+.doc-panel[hidden] { display: none; }
+.doc-panel.ok { border-color: var(--ok); }
+.doc-panel.bad { border-color: var(--bad); }
+.doc-panel .bar { padding: 8px 12px; background: var(--surface-2); font-family: var(--mono); font-size: .85rem; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.doc-panel pre { margin: 0; padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .82rem; }
+.access { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.access .state { font-weight: 650; }
+.access .state.on { color: var(--ok); }
+.access .state.off { color: var(--bad); }
+ol.steps { margin: 0; padding-left: 20px; font-size: .9rem; }
+ol.steps li { margin-bottom: 4px; }
+ul.links { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+ul.links li { display: flex; gap: 8px; align-items: center; justify-content: space-between; font-size: .88rem; }
+ul.links code { overflow-wrap: anywhere; }
+.log-wrap { max-height: 420px; overflow: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+th, td { text-align: left; padding: 6px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+td.req { font-family: var(--mono); overflow-wrap: anywhere; }
+tr.new td { animation: rowflash 1.2s ease-out; }
+@keyframes rowflash { from { background: var(--hit-soft); } to { background: transparent; } }
+.note { color: var(--muted); font-size: .85rem; }
+@media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+</style>
+</head>
+<body>
+<header class="wrap">
+  <h1>Access Revoked <span style="font-weight:500;color:var(--muted)">live</span></h1>
+  <p><span class="live-dot"></span>Connected to the local app at <code id="origin"></code>. Every click below is a real request. People and documents are fictional.</p>
+</header>
+
+<main class="wrap grid">
+  <div>
+    <section class="card">
+      <h2>Search</h2>
+      <div class="row" style="margin-bottom:10px">
+        <span class="note">Signed in as</span>
+        <div class="seg" role="group" aria-label="User">
+          <button type="button" data-user="maya" aria-pressed="true">Maya</button>
+          <button type="button" data-user="sam" aria-pressed="false">Sam</button>
+        </div>
+        <span class="groups" id="groups"></span>
+      </div>
+      <form class="row" id="search-form">
+        <input type="search" id="q" value="renewal budget" aria-label="Search query">
+        <button type="submit">Search</button>
+      </form>
+
+      <div id="result-area" hidden>
+        <div class="summary">
+          <span class="cache-pill" id="cache-pill">Cache hit</span>
+          <span class="count" id="count"></span>
+        </div>
+        <ul class="results" id="results"></ul>
+      </div>
+
+      <div class="doc-panel" id="doc-panel" hidden>
+        <div class="bar"><span id="doc-req"></span><span class="status" id="doc-status"></span></div>
+        <pre id="doc-body"></pre>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Request log</h2>
+      <div class="log-wrap">
+        <table>
+          <thead><tr><th>#</th><th>As</th><th>Request</th><th>Cache</th><th>Results</th><th>HTTP</th></tr></thead>
+          <tbody id="log"></tbody>
+        </table>
+      </div>
+      <p class="note" id="log-empty">Requests you make appear here, newest first.</p>
+    </section>
+  </div>
+
+  <div>
+    <section class="card">
+      <h2>Admin: Maya's Finance access</h2>
+      <div class="access">
+        <span class="state" id="access-state">Checking…</span>
+        <div class="row">
+          <button type="button" class="danger" id="btn-revoke">Revoke</button>
+          <button type="button" class="secondary" id="btn-restore">Restore</button>
+        </div>
+      </div>
+      <p class="note" style="margin:10px 0 0">Sent as <code>X-User: admin</code>. The search cache is not cleared.</p>
+    </section>
+
+    <section class="card">
+      <h2>Links you've seen</h2>
+      <ul class="links" id="links"></ul>
+      <p class="note" id="links-empty" style="margin:0">Search to collect result links. They stay here after access changes, so you can try them again.</p>
+    </section>
+
+    <section class="card">
+      <h2>Try this</h2>
+      <ol class="steps">
+        <li>Search as Maya. It's a cache miss with 2 results.</li>
+        <li>Search again. Now it's a cache hit.</li>
+        <li>Open the Finance-only result. You get 200.</li>
+        <li>Revoke Maya's Finance access.</li>
+        <li>Search again. Still a cache hit, but only 1 result.</li>
+        <li>Open <code>/docs/2</code> from "Links you've seen". You get 404.</li>
+        <li>Switch to Sam and search. It's a cache hit that never shows the Finance document.</li>
+      </ol>
+      <div class="row" style="margin-top:12px">
+        <button type="button" class="secondary" id="btn-reset">Reset demo data</button>
+        <span class="note">Restores memberships and empties the cache.</span>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var user = "maya", n = 0, lastCount = null, seen = {};
+  var FINANCE_TITLE_HINT = "(Finance only)";
+  $("origin").textContent = location.origin;
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  async function call(asUser, method, path, body) {
+    var opts = { method: method, headers: { "X-User": asUser } };
+    if (body) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
+    var res = await fetch(path, opts);
+    var text = await res.text(), json = null;
+    try { json = JSON.parse(text); } catch (e) {}
+    log(asUser, method, path, res.status, res.headers.get("X-Cache"), json);
+    return { status: res.status, json: json };
+  }
+
+  function log(asUser, method, path, status, cache, json) {
+    if (path === "/me") return; // bookkeeping, keep the log focused
+    n++;
+    $("log-empty").hidden = true;
+    var tr = el("tr", "new");
+    tr.appendChild(el("td", null, String(n)));
+    tr.appendChild(el("td", null, asUser));
+    tr.appendChild(el("td", "req", method + " " + path));
+    var c = el("td");
+    if (cache) c.appendChild(el("span", "cache-pill" + (cache === "hit" ? "" : " miss"), cache)).style.cssText = "padding:1px 8px;font-size:.75rem";
+    else c.textContent = "—";
+    tr.appendChild(c);
+    tr.appendChild(el("td", null, json && json.permitted_count != null ? String(json.permitted_count) : "—"));
+    var s = el("td"); s.appendChild(el("span", "status " + (status < 400 ? "ok" : "bad"), String(status)));
+    tr.appendChild(s);
+    $("log").insertBefore(tr, $("log").firstChild);
+  }
+
+  async function refreshGroups() {
+    var me = await call(user, "GET", "/me");
+    var g = $("groups"); g.textContent = "Groups:";
+    (me.json.groups || []).forEach(function (x) { g.appendChild(el("span", "chip " + (x === "finance" ? "fin" : "ws"), x)); });
+    var maya = user === "maya" ? me : await call("maya", "GET", "/me");
+    var inFin = maya.json.groups.indexOf("finance") >= 0;
+    var st = $("access-state");
+    st.textContent = inFin ? "Maya is in Finance" : "Maya's Finance access is revoked";
+    st.className = "state " + (inFin ? "on" : "off");
+    $("btn-revoke").disabled = !inFin;
+    $("btn-restore").disabled = inFin;
+  }
+
+  function renderLinks() {
+    var ul = $("links"); ul.textContent = "";
+    var keys = Object.keys(seen);
+    $("links-empty").hidden = keys.length > 0;
+    keys.sort().forEach(function (url) {
+      var li = el("li");
+      var left = el("span"); left.appendChild(el("code", null, url)); left.appendChild(document.createTextNode(" " + seen[url]));
+      li.appendChild(left);
+      var b = el("button", "secondary small", "Open as " + user[0].toUpperCase() + user.slice(1));
+      b.type = "button";
+      b.addEventListener("click", function () { openDoc(url); });
+      li.appendChild(b);
+      ul.appendChild(li);
+    });
+  }
+
+  async function doSearch() {
+    var q = $("q").value;
+    var r = await call(user, "GET", "/search?q=" + encodeURIComponent(q));
+    $("result-area").hidden = false;
+    var pill = $("cache-pill");
+    pill.textContent = "Cache " + r.json.cache;
+    pill.classList.toggle("miss", r.json.cache !== "hit");
+    pill.classList.remove("flash"); void pill.offsetWidth; pill.classList.add("flash");
+    var cnt = r.json.permitted_count, count = $("count");
+    count.textContent = "";
+    count.appendChild(el("b", null, String(cnt)));
+    count.appendChild(document.createTextNode(cnt === 1 ? "result " : "results "));
+    count.appendChild(document.createTextNode(user[0].toUpperCase() + user.slice(1) + " can open"));
+    count.classList.toggle("down", lastCount !== null && cnt < lastCount);
+    lastCount = cnt;
+    var ul = $("results"); ul.textContent = "";
+    if (!r.json.results.length) ul.appendChild(el("li", "empty", "No results."));
+    r.json.results.forEach(function (res) {
+      seen[res.url] = res.title.indexOf(FINANCE_TITLE_HINT) >= 0 ? "Finance doc" : "Workspace doc";
+      var li = el("li", "result");
+      li.appendChild(el("h3", null, res.title));
+      li.appendChild(el("p", null, res.snippet));
+      var row = el("div", "row");
+      row.appendChild(el("code", null, res.url));
+      var b = el("button", "secondary small", "Open link"); b.type = "button";
+      b.addEventListener("click", function () { openDoc(res.url); });
+      row.appendChild(b);
+      li.appendChild(row);
+      ul.appendChild(li);
+    });
+    renderLinks();
+  }
+
+  async function openDoc(url) {
+    var r = await call(user, "GET", url);
+    var p = $("doc-panel");
+    p.hidden = false;
+    p.className = "doc-panel " + (r.status < 400 ? "ok" : "bad");
+    $("doc-req").textContent = "GET " + url + "  X-User: " + user;
+    var s = $("doc-status"); s.textContent = r.status; s.className = "status " + (r.status < 400 ? "ok" : "bad");
+    $("doc-body").textContent = JSON.stringify(r.json, null, 2);
+    p.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  async function membership(action) {
+    await call("admin", "POST", "/admin/memberships/" + action, { user: "maya", group: "finance" });
+    await refreshGroups();
+  }
+
+  document.querySelectorAll(".seg button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      user = b.dataset.user;
+      document.querySelectorAll(".seg button").forEach(function (x) { x.setAttribute("aria-pressed", String(x === b)); });
+      lastCount = null;
+      $("result-area").hidden = true;
+      $("doc-panel").hidden = true;
+      refreshGroups(); renderLinks();
+    });
+  });
+  $("search-form").addEventListener("submit", function (e) { e.preventDefault(); doSearch(); });
+  $("btn-revoke").addEventListener("click", function () { membership("revoke"); });
+  $("btn-restore").addEventListener("click", function () { membership("grant"); });
+  $("btn-reset").addEventListener("click", async function () {
+    await call("admin", "POST", "/admin/reset");
+    seen = {}; lastCount = null;
+    $("result-area").hidden = true; $("doc-panel").hidden = true;
+    renderLinks(); refreshGroups();
+  });
+
+  refreshGroups(); renderLinks();
+})();
+</script>
+</body>
+</html>
